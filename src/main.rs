@@ -1,4 +1,5 @@
 use std::fs::{self, File};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::{
     collections::{HashMap, HashSet},
@@ -7,8 +8,8 @@ use std::{
 
 use rustc_ast::{
     visit::{walk_crate, walk_item, Visitor},
-    AngleBracketedArg, BareFnTy, FieldDef, FnRetTy, GenericArg, GenericArgs, Item, ItemKind, MutTy,
-    ParenthesizedArgs, Path, Ty, TyAliasKind, TyKind, VariantData,
+    AngleBracketedArg, BareFnTy, FieldDef, FnDecl, FnRetTy, GenericArg, GenericArgs, Item,
+    ItemKind, MutTy, ParenthesizedArgs, Path, Ty, TyAliasKind, TyKind, VariantData,
 };
 use rustc_session::parse::ParseSess;
 use rustc_span::edition::Edition;
@@ -46,6 +47,7 @@ fn main() -> std::io::Result<()> {
     let mut g = graph.clone();
     let mut reachable = HashSet::new();
     reachable.insert("UnsafeCell".to_string());
+    reachable.insert("rawptr".to_string());
 
     loop {
         let mut added = vec![];
@@ -144,7 +146,12 @@ impl ContainTypes for Ty {
     fn type_names(&self) -> HashSet<String> {
         match &self.kind {
             TyKind::Slice(ty) | TyKind::Array(ty, _) | TyKind::Paren(ty) => ty.type_names(),
-            TyKind::Ptr(mt) | TyKind::Rptr(_, mt) => mt.type_names(),
+            TyKind::Ptr(mt) => {
+                let mut s = mt.type_names();
+                s.insert("rawptr".to_string());
+                s
+            },
+            TyKind::Rptr(_, mt) => mt.type_names(),
             TyKind::BareFn(f) => f.type_names(),
             TyKind::Tup(tys) => tys.iter().flat_map(|ty| ty.type_names()).collect(),
             TyKind::Path(_, p) => p.type_names(),
@@ -163,20 +170,18 @@ impl ContainTypes for Ty {
 
 impl ContainTypes for MutTy {
     fn type_names(&self) -> HashSet<String> {
-        // self.ty.type_names()
-        HashSet::new()
+        self.ty.type_names()
     }
 }
 
 impl ContainTypes for BareFnTy {
     fn type_names(&self) -> HashSet<String> {
-        // let FnDecl { inputs, output } = self.decl.deref();
-        // let mut set: HashSet<String> = inputs.iter().flat_map(|p| p.ty.type_names()).collect();
-        // for tn in output.type_names() {
-        //     set.insert(tn);
-        // }
-        // set
-        HashSet::new()
+        let FnDecl { inputs, output } = self.decl.deref();
+        let mut set: HashSet<String> = inputs.iter().flat_map(|p| p.ty.type_names()).collect();
+        for tn in output.type_names() {
+            set.insert(tn);
+        }
+        set
     }
 }
 
